@@ -646,7 +646,3 @@ else:
 6. **Check outputs first** - `ls .claude/` before editing code
 7. **Detached spawn hides errors** - add logging to debug
 
-## See Also
-
-- `/debug-hooks` - Systematic debugging workflow
-See Also: /debug-hooks skill — systematic debugging workflow
