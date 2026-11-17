@@ -127,6 +127,6 @@ The full protocol, persona priors, and agent prompt templates are in
 
 ---
 
-*skeptic-panel is part of the GUSystems Skill Pack — open skills built from
+*skeptic-panel is part of the DRUstack Skill Pack — open skills built from
 real production mistakes. Each ships with the story of the mistake that produced it.
 Built by [Garman Unified Systems](https://idirectships.com).*
