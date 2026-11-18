@@ -223,6 +223,7 @@ def build_denylist_re(words):
 raw_denylist  = os.environ.get('RELEASE_GATE_DENYLIST_WORDS', '')
 denylist_words = [w.strip() for w in raw_denylist.splitlines() if w.strip()]
 DENYLIST_RE    = build_denylist_re(denylist_words)
+scan_errors = []
 
 # ---------------------------------------------------------------------------
 # File reading with UTF-16 BOM detection and latin-1 fallback for binary
@@ -238,6 +239,7 @@ def read_lines(fpath):
                 pass
         return data.decode('latin-1', errors='replace').splitlines()
     except (OSError, PermissionError):
+        scan_errors.append('[scan-error]: unreadable file (path redacted)')
         return []
 
 # ---------------------------------------------------------------------------
@@ -275,10 +277,17 @@ def format_hit(label_prefix, lineno, line):
         m = HOMEPATH_RE.search(line)
         if m:
             matched = m.group(0)
-            # Redact username portion: /Users/<name>/... -> /Users/[redacted]/...
-            parts = matched.replace('\\', '/').split('/')
-            prefix = '/'.join(parts[:3]) if len(parts) >= 3 else matched[:12]
-            return '{:s}:{:d}:{:s}/[...]'.format(label_prefix, lineno, prefix)
+            # Redact username: never emit the actual username in diagnostics.
+            norm = matched.replace('\\', '/')
+            if re.match(r'^/[Uu]sers/', norm):
+                prefix = '/Users'
+            elif re.match(r'^/[Hh]ome/', norm):
+                prefix = '/home'
+            elif re.match(r'^%2F[Uu]sers%2F', norm, re.IGNORECASE):
+                prefix = '%2FUsers%2F'
+            else:
+                prefix = '[path]'
+            return '{:s}:{:d}:{:s}/[redacted]/[...]'.format(label_prefix, lineno, prefix)
         return '{:s}:{:d}:[homepath detected]'.format(label_prefix, lineno)
 
 # ---------------------------------------------------------------------------
@@ -338,7 +347,9 @@ elif mode.endswith('-file'):
 for hit in hits[:30]:
     print(hit)
 
-sys.exit(1 if hits else 0)
+for err in scan_errors[:5]:
+    print(err)
+sys.exit(1 if hits or scan_errors else 0)
 PYEOF
 }
 
@@ -464,8 +475,10 @@ try:
         for hit in data[:10]:
             commit = hit.get("Commit", "")
             commit_disp = " commit={}".format(commit[:8]) if commit else ""
+            raw_file = hit.get('File', '?')
+            safe_file = re.sub(r'(/Users/|/home/)[^/\s]+', r'\1[redacted]', raw_file, flags=re.IGNORECASE)
             print("  {}  {}:{}{}".format(
-                hit.get('RuleID','?'), hit.get('File','?'),
+                hit.get('RuleID','?'), safe_file,
                 hit.get('StartLine','?'), commit_disp))
         if len(data) > 10:
             print("  ... and {} more".format(len(data) - 10))

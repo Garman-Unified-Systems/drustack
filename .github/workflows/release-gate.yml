@@ -49,9 +49,17 @@ jobs:
           tar -xz -C /usr/local/bin gitleaks -f "${GITLEAKS_ARCHIVE}"
           gitleaks version
 
+      - name: Fetch scanner from default branch
+        # Run the scanner from origin/main, not the candidate PR.
+        # Prevents a malicious PR from bypassing the gate by modifying the scanner itself.
+        run: |
+          git fetch origin main
+          git show origin/main:scripts/release-gate.sh > /tmp/release-gate-canonical.sh
+          chmod +x /tmp/release-gate-canonical.sh
+
       - name: Run release gate
         # RELEASE_GATE_DENYLIST must be set (checked above).
         # No fallback to the example list in this workflow.
         env:
           RELEASE_GATE_DENYLIST: ${{ secrets.RELEASE_GATE_DENYLIST }}
-        run: bash scripts/release-gate.sh .
+        run: bash /tmp/release-gate-canonical.sh .

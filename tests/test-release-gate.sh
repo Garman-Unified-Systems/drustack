@@ -327,12 +327,28 @@ check_no_denylist_term() {
     local leaked=0
     while IFS= read -r term; do
         [[ -z "${term}" ]] && continue
-        if echo "${output}" | grep -qi "^[[:space:]]*${term}$"; then
+        if echo "${output}" | grep -qi "${term}"; then
             leaked=1; break
         fi
     done < "${EXAMPLE_DENYLIST}"
     if [[ "${leaked}" -eq 1 ]]; then
         printf "${RED}FAIL${RESET} gate=%d expected=%d  %s\n" 1 0 "${label} (denylist term leaked to output)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        printf "${GREEN}PASS${RESET} gate=%d expected=%d  %s\n" 0 0 "${label}"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+}
+
+check_no_homepath_username() {
+    local label="$1"
+    local test_dir="${TEST_BASE}/homepath-redact-$$"
+    mkdir -p "${test_dir}"
+    printf '/Users/testuser/some/private/path\n' > "${test_dir}/hp.txt"
+    local output
+    output=$(RELEASE_GATE_DENYLIST_FILE="${EXAMPLE_DENYLIST}" bash "${GATE}" --no-git "${test_dir}" 2>&1 || true)
+    if echo "${output}" | grep -qE '/Users/[a-zA-Z0-9_.-]+[^/]'; then
+        printf "${RED}FAIL${RESET} gate=%d expected=%d  %s\n" 1 0 "${label} (username in homepath diagnostic)"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     else
         printf "${GREEN}PASS${RESET} gate=%d expected=%d  %s\n" 0 0 "${label}"
@@ -348,6 +364,7 @@ REDACT_MECH="${TEST_BASE}/redact-mech-$$"
 mkdir -p "${REDACT_MECH}"
 printf 'runs on FAKENODE-ALPHA\n' > "${REDACT_MECH}/p.txt"
 check_no_denylist_term "redact-denylist-term-not-in-output" "${REDACT_MECH}"
+check_no_homepath_username "redact-homepath-username-not-in-output"
 
 echo
 echo "=== results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed ==="
