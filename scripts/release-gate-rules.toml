@@ -10,12 +10,14 @@ useDefault = true
 # Allowlist: test fixtures contain intentional fake secrets/codenames;
 # the scanner script contains the patterns as literal regex strings.
 # All other paths in the repo remain fully covered.
+# Paths are anchored at the repo root (^ prefix) and use exact matching
+# so .bak files, subdirectory lookalikes, or vendor copies are NOT excluded.
 [allowlist]
 description = "Scanner's own test fixtures and pattern source"
 paths = [
-  '''tests/fixtures/should-fail/''',
-  '''scripts/release-gate\.sh''',
-  '''scripts/release-gate-rules\.toml''',
+  '''^tests/fixtures/should-fail/''',
+  '''^scripts/release-gate\.sh$''',
+  '''^scripts/release-gate-rules\.toml$''',
 ]
 
 [[rules]]

@@ -1,0 +1,4 @@
+# This fixture must PASS all checks.
+# Prism.js is a legitimate JavaScript library name, not an internal codename.
+highlight: Syntax highlighting via Prism.js
+loader: import Prism from 'prism.js'

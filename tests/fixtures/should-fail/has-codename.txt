@@ -1,26 +1,17 @@
 # This fixture must trigger the codenames check.
-# Each line exercises a different codename class.
+# Uses names from scripts/example-denylist.txt (fake names for public testing).
 
-# Fleet node names (not inside approved brand strings)
-# GUS standalone — not GUSystems
-coordinator: GUS
-# DRU standalone — not DRUstack
-owner: DRU
-# Other node names
-deploy_target: LAB
+# Fake denylist match — exact case
+deploy_target: FAKENODE-ALPHA
 
-# Persona names
-primary_reviewer: Melvil
-secondary: Cassi
+# Fake denylist match — title case (tests IGNORECASE)
+primary_reviewer: Fakepersona-Charlie
 
-# role@node string
-dispatched_by: foreman@dru
+# Fake denylist match — dotted/punctuated form (tests punctuation tolerance)
+bus_ref: FAKEBUS.ECHO
 
-# Bead ID
-tracked_in: dru-ab12cd
+# Structural: governance rule ID (always checked; no denylist needed)
+see_also: GOV-999
 
-# Governance rule ID
-see_also: GOV-084
-
-# Internal bus name
-queue: mesh-bus
+# Structural: CGNAT tailnet address
+service_host: 100.115.27.81

@@ -32,4 +32,12 @@ jobs:
           gitleaks version
 
       - name: Run release gate
+        # RELEASE_GATE_DENYLIST: set this secret in the repository's Settings →
+        # Secrets and Variables → Actions. Value: newline or comma-separated list
+        # of internal codenames to block from public artifacts.
+        # If the secret is not set, the gate falls back to the public example list
+        # so CI does not break on forks or during initial setup.
+        env:
+          RELEASE_GATE_DENYLIST: ${{ secrets.RELEASE_GATE_DENYLIST }}
+          RELEASE_GATE_DENYLIST_FILE: scripts/example-denylist.txt
         run: bash scripts/release-gate.sh .

@@ -1,0 +1,4 @@
+# This fixture must PASS all checks.
+# Aura component library is a legitimate UI framework name, not an internal codename.
+ui: Built with the Aura component library
+framework: Aura component framework for Lightning
