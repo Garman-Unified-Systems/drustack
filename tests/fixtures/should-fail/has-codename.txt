@@ -1,0 +1,26 @@
+# This fixture must trigger the codenames check.
+# Each line exercises a different codename class.
+
+# Fleet node names (not inside approved brand strings)
+# GUS standalone — not GUSystems
+coordinator: GUS
+# DRU standalone — not DRUstack
+owner: DRU
+# Other node names
+deploy_target: LAB
+
+# Persona names
+primary_reviewer: Melvil
+secondary: Cassi
+
+# role@node string
+dispatched_by: foreman@dru
+
+# Bead ID
+tracked_in: dru-ab12cd
+
+# Governance rule ID
+see_also: GOV-084
+
+# Internal bus name
+queue: mesh-bus
