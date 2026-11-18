@@ -19,6 +19,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify denylist secret is set
+        # The gate fails closed when no denylist is present (by design).
+        # This step adds a human-readable error before the gate runs so
+        # the failure reason is obvious in CI logs.
+        # To set the secret: Settings → Secrets and variables → Actions →
+        # New repository secret; name: RELEASE_GATE_DENYLIST; value: one
+        # internal codename per line (or comma-separated).
+        env:
+          RELEASE_GATE_DENYLIST: ${{ secrets.RELEASE_GATE_DENYLIST }}
+        run: |
+          if [ -z "${RELEASE_GATE_DENYLIST}" ]; then
+            echo "ERROR: RELEASE_GATE_DENYLIST secret is not set."
+            echo "Set it in: Settings → Secrets and variables → Actions."
+            echo "Value: newline or comma-separated list of internal codenames."
+            echo "The gate fails closed without a real denylist."
+            exit 1
+          fi
+
       - name: Install gitleaks with checksum verification
         run: |
           GITLEAKS_VERSION="8.30.1"
@@ -32,12 +50,8 @@ jobs:
           gitleaks version
 
       - name: Run release gate
-        # RELEASE_GATE_DENYLIST: set this secret in the repository's Settings →
-        # Secrets and Variables → Actions. Value: newline or comma-separated list
-        # of internal codenames to block from public artifacts.
-        # If the secret is not set, the gate falls back to the public example list
-        # so CI does not break on forks or during initial setup.
+        # RELEASE_GATE_DENYLIST must be set (checked above).
+        # No fallback to the example list in this workflow.
         env:
           RELEASE_GATE_DENYLIST: ${{ secrets.RELEASE_GATE_DENYLIST }}
-          RELEASE_GATE_DENYLIST_FILE: scripts/example-denylist.txt
         run: bash scripts/release-gate.sh .

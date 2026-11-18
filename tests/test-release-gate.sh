@@ -295,6 +295,60 @@ mkdir -p "${FP}"
 printf 'Built with the Aura component library\n' > "${FP}/p.txt"
 run_gate "${FP}" 0 "fp-f05-aura-component"
 
+
+# ---------------------------------------------------------------------------
+# 9. Redaction assertions — verify CI logs never expose raw secrets or
+#    denylist terms.
+# ---------------------------------------------------------------------------
+echo
+echo "--- redaction assertions (output must not contain raw secret or denylist term) ---"
+
+check_no_raw_secret() {
+    local label="$1"
+    local dir="$2"
+    local output
+    output=$(RELEASE_GATE_DENYLIST_FILE="${EXAMPLE_DENYLIST}" bash "${GATE}" "${dir}" 2>&1 || true)
+    # ntn_ tokens are 50+ chars; ntn_ alone in output is a raw leak
+    if echo "${output}" | grep -qE 'ntn_[A-Za-z0-9]{10,}'; then
+        printf "${RED}FAIL${RESET} gate=%d expected=%d  %s\n" 1 0 "${label} (raw secret in output)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        printf "${GREEN}PASS${RESET} gate=%d expected=%d  %s\n" 0 0 "${label}"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+}
+
+check_no_denylist_term() {
+    local label="$1"
+    local dir="$2"
+    local output
+    output=$(RELEASE_GATE_DENYLIST_FILE="${EXAMPLE_DENYLIST}" bash "${GATE}" "${dir}" 2>&1 || true)
+    # Check that none of the fake denylist terms appear verbatim in output
+    local leaked=0
+    while IFS= read -r term; do
+        [[ -z "${term}" ]] && continue
+        if echo "${output}" | grep -qi "^[[:space:]]*${term}$"; then
+            leaked=1; break
+        fi
+    done < "${EXAMPLE_DENYLIST}"
+    if [[ "${leaked}" -eq 1 ]]; then
+        printf "${RED}FAIL${RESET} gate=%d expected=%d  %s\n" 1 0 "${label} (denylist term leaked to output)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        printf "${GREEN}PASS${RESET} gate=%d expected=%d  %s\n" 0 0 "${label}"
+        PASS_COUNT=$((PASS_COUNT + 1))
+    fi
+}
+
+# Secret in a UTF-16 file — output must not contain the raw token
+check_no_raw_secret "redact-enc-s09-utf16-secret-output" "${ENC_S09}"
+
+# Codename match — output must not print the denylist term
+REDACT_MECH="${TEST_BASE}/redact-mech-$$"
+mkdir -p "${REDACT_MECH}"
+printf 'runs on FAKENODE-ALPHA\n' > "${REDACT_MECH}/p.txt"
+check_no_denylist_term "redact-denylist-term-not-in-output" "${REDACT_MECH}"
+
 echo
 echo "=== results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed ==="
 

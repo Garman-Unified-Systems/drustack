@@ -251,6 +251,37 @@ def is_excluded(relpath):
     return norm in excl_files
 
 # ---------------------------------------------------------------------------
+# Hit formatter — redacts sensitive content from scan output so CI logs
+# never expose secrets or private denylist terms.
+# ---------------------------------------------------------------------------
+def format_hit(label_prefix, lineno, line):
+    if mode.startswith('secrets'):
+        m = SECRETS_RE.search(line)
+        if m:
+            matched = m.group(0)
+            family = matched[:4] if len(matched) >= 4 else matched
+            return '{:s}:{:d}:[secret detected: {:s}***]'.format(
+                label_prefix, lineno, family)
+        return '{:s}:{:d}:[secret detected]'.format(label_prefix, lineno)
+    elif mode.startswith('codename'):
+        # Never print the matched codename — it comes from the private
+        # denylist and must not appear in CI logs.
+        if STRUCTURAL_RE.search(line) and not is_false_positive(line):
+            family = 'structural-pattern'
+        else:
+            family = 'codename-match'
+        return '{:s}:{:d}:[{:s}]'.format(label_prefix, lineno, family)
+    else:  # homepath
+        m = HOMEPATH_RE.search(line)
+        if m:
+            matched = m.group(0)
+            # Redact username portion: /Users/<name>/... -> /Users/[redacted]/...
+            parts = matched.replace('\\', '/').split('/')
+            prefix = '/'.join(parts[:3]) if len(parts) >= 3 else matched[:12]
+            return '{:s}:{:d}:{:s}/[...]'.format(label_prefix, lineno, prefix)
+        return '{:s}:{:d}:[homepath detected]'.format(label_prefix, lineno)
+
+# ---------------------------------------------------------------------------
 # Line scanner
 # ---------------------------------------------------------------------------
 def scan_lines(lines, label_prefix):
@@ -267,7 +298,7 @@ def scan_lines(lines, label_prefix):
             elif DENYLIST_RE and DENYLIST_RE.search(line) and not is_false_positive(line):
                 matched = True
         if matched:
-            hits.append('{:s}:{:d}:{:s}'.format(label_prefix, lineno, line.rstrip()))
+            hits.append(format_hit(label_prefix, lineno, line))
         if len(hits) >= 30:
             break
     return hits
