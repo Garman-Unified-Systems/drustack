@@ -1,0 +1,19 @@
+# This fixture must pass all checks.
+
+# Approved brand names are allowed.
+company: GUSystems
+product: DRUstack
+library: dbnt
+framework: ABCDxDBNTxKISS
+
+# Relative paths are allowed.
+config: ./config/defaults.yml
+data: ../shared/data.json
+
+# Generic role descriptions without node attribution are allowed.
+role: reviewer
+team: build-team
+tool: code-scanner
+
+# A generic GitHub Actions context reference — no username leak.
+deploy_step: checkout and build

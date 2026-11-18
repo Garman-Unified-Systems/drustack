@@ -1,0 +1,10 @@
+# Public example denylist — FAKE names for testing scanner mechanics only.
+# These names are intentionally invented and have no meaning.
+# Production deployments load real names via RELEASE_GATE_DENYLIST (CI secret)
+# or ~/.secrets/release-gate-denylist.txt (local file; never committed).
+FAKENODE-ALPHA
+FAKENODE-BRAVO
+FAKEPERSONA-CHARLIE
+FAKEPERSONA-DELTA
+FAKEBUS-ECHO
+FAKEROUTER-FOXTROT

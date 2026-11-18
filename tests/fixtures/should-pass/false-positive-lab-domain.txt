@@ -1,0 +1,4 @@
+# This fixture must PASS all checks.
+# A role@domain email where the domain starts with "lab" is not a node reference.
+contact: info@lab.example.org
+support: team@lab.company.com

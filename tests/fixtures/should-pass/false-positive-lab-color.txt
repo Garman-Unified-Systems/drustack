@@ -1,0 +1,5 @@
+# This fixture must PASS all checks.
+# LAB color space is a legitimate color model term, not an internal node name.
+convert: Convert image to LAB color space
+model: The CIE LAB color model is perceptually uniform
+mode: color mode LAB

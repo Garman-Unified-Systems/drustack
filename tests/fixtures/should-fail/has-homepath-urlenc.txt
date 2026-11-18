@@ -1,0 +1,3 @@
+# This fixture must trigger the home-path check.
+# Tests URL-encoded home path detection.
+link: file%3A%2F%2F%2FUsers%2Falice%2Fprojects%2Fconfig.json

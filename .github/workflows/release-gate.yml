@@ -1,0 +1,68 @@
+name: Release Gate
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # actions/checkout@v4 — pinned SHA 2026-11-17
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Verify denylist secret is set
+        # The gate fails closed when no denylist is present (by design).
+        # This step adds a human-readable error before the gate runs so
+        # the failure reason is obvious in CI logs.
+        # To set the secret: Settings → Secrets and variables → Actions →
+        # New repository secret; name: RELEASE_GATE_DENYLIST; value: one
+        # internal codename per line (or comma-separated).
+        env:
+          RELEASE_GATE_DENYLIST: ${{ secrets.RELEASE_GATE_DENYLIST }}
+        run: |
+          if [ -z "${RELEASE_GATE_DENYLIST}" ]; then
+            echo "ERROR: RELEASE_GATE_DENYLIST secret is not set."
+            echo "Set it in: Settings → Secrets and variables → Actions."
+            echo "Value: newline or comma-separated list of internal codenames."
+            echo "The gate fails closed without a real denylist."
+            exit 1
+          fi
+
+      - name: Install gitleaks with checksum verification
+        run: |
+          GITLEAKS_VERSION="8.30.1"
+          GITLEAKS_ARCHIVE="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          GITLEAKS_URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${GITLEAKS_ARCHIVE}"
+          EXPECTED_SHA256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+
+          curl -sSfL "${GITLEAKS_URL}" -o "${GITLEAKS_ARCHIVE}"
+          echo "${EXPECTED_SHA256}  ${GITLEAKS_ARCHIVE}" | sha256sum --check --strict
+          tar -xz -C /usr/local/bin gitleaks -f "${GITLEAKS_ARCHIVE}"
+          gitleaks version
+
+      - name: Fetch scanner from default branch
+        # Run the scanner and rules from origin/main, not the candidate PR.
+        # Prevents a malicious PR from bypassing the gate by modifying the scanner or
+        # adding a permissive .gitleaks.toml. The script looks for the rules file at
+        # <SCRIPT_DIR>/release-gate-rules.toml so we place it beside the script in /tmp.
+        run: |
+          git fetch origin main
+          git show origin/main:scripts/release-gate.sh > /tmp/release-gate-canonical.sh
+          git show origin/main:scripts/release-gate-rules.toml > /tmp/release-gate-rules.toml
+          chmod +x /tmp/release-gate-canonical.sh
+
+      - name: Run release gate
+        # RELEASE_GATE_DENYLIST must be set (checked above).
+        # No fallback to the example list in this workflow.
+        env:
+          RELEASE_GATE_DENYLIST: ${{ secrets.RELEASE_GATE_DENYLIST }}
+        run: bash /tmp/release-gate-canonical.sh .

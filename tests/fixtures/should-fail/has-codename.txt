@@ -1,0 +1,17 @@
+# This fixture must trigger the codenames check.
+# Uses names from scripts/example-denylist.txt (fake names for public testing).
+
+# Fake denylist match — exact case
+deploy_target: FAKENODE-ALPHA
+
+# Fake denylist match — title case (tests IGNORECASE)
+primary_reviewer: Fakepersona-Charlie
+
+# Fake denylist match — dotted/punctuated form (tests punctuation tolerance)
+bus_ref: FAKEBUS.ECHO
+
+# Structural: governance rule ID (always checked; no denylist needed)
+see_also: GOV-999
+
+# Structural: CGNAT tailnet address
+service_host: 100.115.27.81

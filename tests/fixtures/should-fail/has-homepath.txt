@@ -1,0 +1,6 @@
+# This fixture must trigger the home-path check.
+# An absolute macOS home path leaking a username.
+config_path: /Users/alice/projects/myapp/config.json
+
+# An absolute Linux home path.
+data_dir: /home/bob/.config/myapp
