@@ -328,7 +328,7 @@ def scan_lines(lines, label_prefix):
 
 hits = []
 
-if mode.endswith('-wt'):
+if mode.endswith('-wt') or mode == 'secrets-text':
     for dirpath, dirnames, filenames in os.walk(target):
         dirnames[:] = [d for d in dirnames if d != '.git']
         for fname in filenames:
@@ -523,7 +523,7 @@ _handle_gitleaks_exit() {
     if [[ "${gl_exit}" -eq 1 ]]; then
         fail "${label}: gitleaks found secrets"
         python3 - "${tmp_report}" <<'JEOF' 2>/dev/null || true
-import json, sys
+import json, re, sys
 try:
     data = json.load(open(sys.argv[1]))
     if isinstance(data, list):
