@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 # release-gate.sh — public-release scanner for DRUstack artifacts.
 #
-# Fails (exit 1) when any of three classes of violations are found:
-#   secrets   — gitleaks with extended rules covering Notion, OpenAI, Anthropic,
-#               HuggingFace, and AWS (gitleaks default rules miss these families).
-#   homepaths — absolute paths that embed a username (/Users/<name>, /home/<name>).
-#   codenames — internal fleet names, bead IDs, GOV-### rule IDs, and tool names
-#               that must not appear in public artifacts.
+# Fails (exit 1) when any of four checks find violations:
+#   secrets-fs       — gitleaks filesystem scan (working tree) with extended
+#                      rules for Notion, OpenAI, Anthropic, HuggingFace, AWS.
+#   secrets-history  — gitleaks git-history scan (--all commits) with the
+#                      same extended rules; catches secrets that were committed
+#                      and later deleted. Runs only when inside a git repo.
+#   homepaths        — absolute paths embedding a username (/Users/<n>, /home/<n>).
+#   codenames        — internal fleet names, bead IDs, GOV-### rule IDs, and
+#                      tool names that must not appear in public artifacts.
+#
+# --no-git mode: pass --no-git to skip the history scan. Use this when
+# scanning an extracted release artifact (a tarball, dist/ folder, or any
+# path that is not a git checkout). The filesystem scan still runs.
 #
 # Usage:
-#   ./scripts/release-gate.sh [<path>]
-#
-#   <path>  directory to scan (default: current directory).
+#   ./scripts/release-gate.sh [--no-git] [<path>]
 #
 # Requires:
 #   - gitleaks >=8.0 on PATH (https://github.com/gitleaks/gitleaks)
-#   - python3 >=3.8 on PATH (for home-path and codename scans)
+#   - python3 >=3.8 on PATH
+#   - git (for history scan; skipped with --no-git)
 #
 # Exit codes:
 #   0  all checks passed
@@ -24,7 +30,17 @@
 
 set -euo pipefail
 
-SCAN_ROOT="${1:-.}"
+SKIP_GIT_HISTORY=0
+SCAN_ROOT=""
+
+for arg in "$@"; do
+    case "${arg}" in
+        --no-git) SKIP_GIT_HISTORY=1 ;;
+        *)        SCAN_ROOT="${arg}" ;;
+    esac
+done
+SCAN_ROOT="${SCAN_ROOT:-.}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RULES_FILE="${SCRIPT_DIR}/release-gate-rules.toml"
 VIOLATIONS=0
@@ -40,21 +56,34 @@ info() { printf "${YELLOW}INFO${RESET} %s\n" "$1"; }
 
 # ---------------------------------------------------------------------------
 # Shared Python scanner
-# Wraps file-walking + regex matching so we don't depend on grep -P,
-# which macOS BSD grep does not support.
+# Uses python3 re for home-path and codename matching. This avoids
+# relying on grep -P, which macOS BSD grep does not support.
+#
+# Paths in EXCLUDED_SCAN_PATHS are always skipped by the Python scanner.
+# They match paths in the allowlist section of release-gate-rules.toml so
+# the scanner's own test fixtures and pattern source are excluded from
+# every check while every other path in the repo stays covered.
 # ---------------------------------------------------------------------------
+EXCLUDED_SCAN_PATHS=(
+    "tests/fixtures/should-fail"
+    "scripts/release-gate.sh"
+    "scripts/release-gate-rules.toml"
+)
+
 python_scan() {
-    # Args: pattern_type ("homepath"|"codename") scan_root
     local pattern_type="$1"
     local scan_root="$2"
+    shift 2
+    local excluded=("$@")
 
-    python3 - "${pattern_type}" "${scan_root}" <<'PYEOF'
+    python3 - "${pattern_type}" "${scan_root}" "${excluded[@]}" <<'PYEOF'
 import sys
 import re
 import os
 
 pattern_type = sys.argv[1]
 scan_root = sys.argv[2]
+excluded_paths = sys.argv[3:]
 
 HOMEPATH_PATTERN = re.compile(
     r'/Users/[^/\s"\'>{}\|\\]+'
@@ -96,11 +125,20 @@ CODENAME_PATTERN = re.compile(
 
 pattern = HOMEPATH_PATTERN if pattern_type == "homepath" else CODENAME_PATTERN
 
+def is_excluded(fpath):
+    rel = os.path.relpath(fpath, scan_root)
+    for exc in excluded_paths:
+        if rel.startswith(exc) or exc in rel:
+            return True
+    return False
+
 hits = []
 for dirpath, dirnames, filenames in os.walk(scan_root):
     dirnames[:] = [d for d in dirnames if d != ".git"]
     for fname in filenames:
         fpath = os.path.join(dirpath, fname)
+        if is_excluded(fpath):
+            continue
         try:
             with open(fpath, encoding="utf-8", errors="replace") as f:
                 for lineno, line in enumerate(f, 1):
@@ -121,15 +159,9 @@ PYEOF
 }
 
 # ---------------------------------------------------------------------------
-# Check 1: secrets (gitleaks + extended rules)
+# Check 1: secrets — filesystem scan (working tree)
 # ---------------------------------------------------------------------------
-check_secrets() {
-    if ! command -v gitleaks >/dev/null 2>&1; then
-        printf >&2 "ERROR: gitleaks not found on PATH.\n"
-        printf >&2 "Install: https://github.com/gitleaks/gitleaks/releases\n"
-        exit 2
-    fi
-
+check_secrets_fs() {
     local extra_args=()
     if [[ -f "${RULES_FILE}" ]]; then
         extra_args+=(--config "${RULES_FILE}")
@@ -138,7 +170,7 @@ check_secrets() {
         info "WARNING: gitleaks defaults miss Notion, OpenAI, Anthropic, HuggingFace, AWS families."
     fi
 
-    info "Running gitleaks on ${SCAN_ROOT} ..."
+    info "Scanning filesystem (working tree) for secrets ..."
 
     local tmp_report
     tmp_report="$(mktemp)"
@@ -152,43 +184,86 @@ check_secrets() {
         --redact \
         "${extra_args[@]}" 2>/dev/null || gl_exit=$?
 
+    _handle_gitleaks_exit "${gl_exit}" "${tmp_report}" "secrets-fs"
+    /bin/rm -f "${tmp_report}" 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# Check 2: secrets — git history scan (all commits)
+# Catches secrets that were committed then deleted.
+# Skipped with --no-git or when SCAN_ROOT is not a git repository.
+# ---------------------------------------------------------------------------
+check_secrets_history() {
+    if [[ "${SKIP_GIT_HISTORY}" -eq 1 ]]; then
+        info "Skipping history scan (--no-git)."
+        return
+    fi
+
+    if ! git -C "${SCAN_ROOT}" rev-parse --git-dir >/dev/null 2>&1; then
+        info "Skipping history scan (${SCAN_ROOT} is not a git repository)."
+        return
+    fi
+
+    local extra_args=()
+    if [[ -f "${RULES_FILE}" ]]; then
+        extra_args+=(--config "${RULES_FILE}")
+    fi
+
+    info "Scanning git history (all commits) for secrets ..."
+
+    local tmp_report
+    tmp_report="$(mktemp)"
+
+    local gl_exit=0
+    gitleaks detect \
+        --source "${SCAN_ROOT}" \
+        --report-path "${tmp_report}" \
+        --report-format json \
+        --log-opts="--all" \
+        --redact \
+        "${extra_args[@]}" 2>/dev/null || gl_exit=$?
+
+    _handle_gitleaks_exit "${gl_exit}" "${tmp_report}" "secrets-history"
+    /bin/rm -f "${tmp_report}" 2>/dev/null || true
+}
+
+_handle_gitleaks_exit() {
+    local gl_exit="$1"
+    local tmp_report="$2"
+    local label="$3"
+
     if [[ "${gl_exit}" -eq 1 ]]; then
-        fail "secrets: gitleaks found secrets (exit ${gl_exit})"
+        fail "${label}: gitleaks found secrets"
         python3 - "${tmp_report}" <<'EOF' 2>/dev/null || true
 import json, sys
 try:
     data = json.load(open(sys.argv[1]))
     if isinstance(data, list):
         for hit in data[:10]:
-            print(f"  {hit.get('RuleID','?')}  {hit.get('File','?')}:{hit.get('StartLine','?')}")
+            commit = hit.get("Commit", "")
+            commit_disp = f" commit={commit[:8]}" if commit else ""
+            print(f"  {hit.get('RuleID','?')}  {hit.get('File','?')}:{hit.get('StartLine','?')}{commit_disp}")
         if len(data) > 10:
             print(f"  ... and {len(data)-10} more")
 except Exception:
     pass
 EOF
     elif [[ "${gl_exit}" -ne 0 ]]; then
-        fail "secrets: gitleaks exited with unexpected code ${gl_exit}"
+        fail "${label}: gitleaks exited with unexpected code ${gl_exit}"
     else
-        pass "secrets: gitleaks clean"
+        pass "${label}: gitleaks clean"
     fi
-
-    /bin/rm -f "${tmp_report}" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
-# Check 2: absolute home paths
+# Check 3: absolute home paths
 # ---------------------------------------------------------------------------
 check_homepaths() {
-    if ! command -v python3 >/dev/null 2>&1; then
-        printf >&2 "ERROR: python3 not found on PATH.\n"
-        exit 2
-    fi
-
-    info "Scanning for absolute home paths in ${SCAN_ROOT} ..."
+    info "Scanning for absolute home paths ..."
 
     local scan_exit=0
     local hits
-    hits=$(python_scan "homepath" "${SCAN_ROOT}" 2>/dev/null) || scan_exit=$?
+    hits=$(python_scan "homepath" "${SCAN_ROOT}" "${EXCLUDED_SCAN_PATHS[@]}" 2>/dev/null) || scan_exit=$?
 
     if [[ "${scan_exit}" -ne 0 ]] || [[ -n "${hits}" ]]; then
         fail "homepaths: absolute home paths found"
@@ -201,21 +276,14 @@ check_homepaths() {
 }
 
 # ---------------------------------------------------------------------------
-# Check 3: codenames
+# Check 4: codenames
 # ---------------------------------------------------------------------------
-# Allowlist: GUSystems (contains GUS), DRUstack (contains DRU),
-#            dbnt, ABCDxDBNTxKISS — approved public brand names.
 check_codenames() {
-    if ! command -v python3 >/dev/null 2>&1; then
-        printf >&2 "ERROR: python3 not found on PATH.\n"
-        exit 2
-    fi
-
-    info "Scanning for internal codenames in ${SCAN_ROOT} ..."
+    info "Scanning for internal codenames ..."
 
     local scan_exit=0
     local hits
-    hits=$(python_scan "codename" "${SCAN_ROOT}" 2>/dev/null) || scan_exit=$?
+    hits=$(python_scan "codename" "${SCAN_ROOT}" "${EXCLUDED_SCAN_PATHS[@]}" 2>/dev/null) || scan_exit=$?
 
     if [[ "${scan_exit}" -ne 0 ]] || [[ -n "${hits}" ]]; then
         fail "codenames: internal names found"
@@ -231,10 +299,22 @@ check_codenames() {
 # Main
 # ---------------------------------------------------------------------------
 main() {
+    if ! command -v gitleaks >/dev/null 2>&1; then
+        printf >&2 "ERROR: gitleaks not found on PATH.\n"
+        printf >&2 "Install: https://github.com/gitleaks/gitleaks/releases\n"
+        exit 2
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf >&2 "ERROR: python3 not found on PATH.\n"
+        exit 2
+    fi
+
     printf "=== release-gate scan: %s ===\n" "$(realpath "${SCAN_ROOT}")"
     printf "timestamp: %s\n\n" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-    check_secrets
+    check_secrets_fs
+    echo
+    check_secrets_history
     echo
     check_homepaths
     echo
