@@ -66,6 +66,11 @@ if [[ ! -f "${RULES_FILE}" ]]; then
     exit 1
 fi
 
+# Empty ignore-path override: passed to every gitleaks call so a PR-supplied
+# .gitleaksignore in the scan root cannot suppress any findings.
+GL_EMPTY_IGNORE="$(mktemp)"
+trap '/bin/rm -f "${GL_EMPTY_IGNORE}" 2>/dev/null || true' EXIT
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -125,6 +130,7 @@ EXCLUDED_EXACT_FILES=(
 #   homepath-wt      scan working-tree directory for home paths
 #   codename-wt      scan working-tree directory for codenames (uses DENYLIST)
 #   secrets-wt       scan working-tree directory for secrets in binary/UTF-16
+#   secrets-text     scan working-tree directory for secrets in text files (gitleaks-bypass backstop)
 #   homepath-file    scan a pre-generated text file for home paths
 #   codename-file    scan a pre-generated text file for codenames
 #
@@ -330,14 +336,17 @@ if mode.endswith('-wt'):
             rel   = os.path.relpath(fpath, target)
             if is_excluded(rel):
                 continue
-            # For secrets-wt: only process binary / UTF-16 files
-            if mode == 'secrets-wt':
+            # secrets-wt: only binary/UTF-16; secrets-text: only plain text
+            if mode in ('secrets-wt', 'secrets-text'):
                 try:
                     with open(fpath, 'rb') as fh:
                         raw = fh.read(512)
                     is_utf16 = raw[:2] in (b'\xff\xfe', b'\xfe\xff')
                     has_nul  = b'\x00' in raw
-                    if not is_utf16 and not has_nul:
+                    is_binary = is_utf16 or has_nul
+                    if mode == 'secrets-wt' and not is_binary:
+                        continue
+                    if mode == 'secrets-text' and is_binary:
                         continue
                 except (OSError, PermissionError):
                     continue
@@ -368,6 +377,7 @@ check_secrets_fs() {
     local extra_args=()
     [[ -f "${RULES_FILE}" ]] && extra_args+=(--config "${RULES_FILE}") \
         || info "Extended rules file not found; using gitleaks defaults (misses some families)."
+    extra_args+=(--ignore-gitleaks-allow --gitleaks-ignore-path "${GL_EMPTY_IGNORE}")
 
     info "Scanning filesystem for secrets (archives up to depth 2) ..."
     local tmp_report; tmp_report="$(mktemp)"
@@ -399,6 +409,7 @@ check_secrets_history() {
 
     local extra_args=()
     [[ -f "${RULES_FILE}" ]] && extra_args+=(--config "${RULES_FILE}")
+    extra_args+=(--ignore-gitleaks-allow --gitleaks-ignore-path "${GL_EMPTY_IGNORE}")
 
     info "Scanning git history patches for secrets ..."
     local tmp_report; tmp_report="$(mktemp)"
@@ -430,6 +441,7 @@ check_secrets_commit_msgs() {
 
     local extra_args=()
     [[ -f "${RULES_FILE}" ]] && extra_args+=(--config "${RULES_FILE}")
+    extra_args+=(--ignore-gitleaks-allow --gitleaks-ignore-path "${GL_EMPTY_IGNORE}")
 
     info "Scanning commit messages for secrets ..."
 
@@ -451,7 +463,42 @@ check_secrets_commit_msgs() {
 }
 
 # ---------------------------------------------------------------------------
-# Check 4: secrets — binary and UTF-16 files (Python scanner)
+# Check 4a: gitleaksignore gate — a PR-supplied ignore file is a bypass attempt
+# ---------------------------------------------------------------------------
+check_no_gitleaksignore() {
+    if [[ -f "${SCAN_ROOT}/.gitleaksignore" ]]; then
+        fail "secrets-bypass: .gitleaksignore found in scan root — remove it before release"
+        printf "  File: %s/.gitleaksignore\n" "${SCAN_ROOT}"
+        printf "  A .gitleaksignore suppresses gitleaks findings. It must not be committed.\n"
+    else
+        pass "secrets-bypass: no .gitleaksignore in scan root"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Check 4b: secrets — text files (Python SECRETS_RE backstop)
+#
+# Independent of gitleaks. Cannot be suppressed by .gitleaksignore or
+# gitleaks:allow comments. Catches the same secret families the gitleaks
+# extended rules cover but via direct regex over every UTF-8 text file.
+# ---------------------------------------------------------------------------
+check_secrets_text() {
+    info "Scanning text files for secrets (Python SECRETS_RE backstop) ..."
+
+    local scan_exit=0
+    local hits
+    hits=$(run_python_scanner "secrets-text" "${SCAN_ROOT}" 2>/dev/null) || scan_exit=$?
+
+    if [[ "${scan_exit}" -ne 0 ]] || [[ -n "${hits}" ]]; then
+        fail "secrets-text: SECRETS_RE backstop found matches in text files"
+        while IFS= read -r line; do printf "  %s\n" "${line}"; done <<< "${hits}"
+    else
+        pass "secrets-text: no SECRETS_RE matches in text files"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Check 4c: secrets — binary and UTF-16 files (Python scanner)
 # ---------------------------------------------------------------------------
 check_secrets_binary() {
     info "Scanning binary/UTF-16 files for secrets ..."
@@ -608,11 +655,15 @@ main() {
     printf "=== release-gate scan: %s ===\n" "$(realpath "${SCAN_ROOT}")"
     printf "timestamp: %s\n\n" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
+    check_no_gitleaksignore
+    echo
     check_secrets_fs
     echo
     check_secrets_history
     echo
     check_secrets_commit_msgs
+    echo
+    check_secrets_text
     echo
     check_secrets_binary
     echo

@@ -382,6 +382,32 @@ printf 'token = "ntn_K3mP9xL2nQ7rF8vY4wJ1aT6sBuH0cD5eI9zG4oN2kR7pW3iU6yX1qM8"\n'
 # Gate must still catch this because it uses --config pointing to the canonical rules file.
 run_gate "${NEARMISS}" 1 "nearmiss-permissive-toml-still-caught"
 
+# ---------------------------------------------------------------------------
+# 11. Near-miss probe — .gitleaksignore in scan root must fail the gate
+#     Proves check_no_gitleaksignore fires before any secret scan runs.
+# ---------------------------------------------------------------------------
+echo
+echo "--- near-miss probe (.gitleaksignore in scan root must be rejected) ---"
+
+NEARMISS_GI="${TEST_BASE}/nearmiss-gitleaksignore-$$"
+mkdir -p "${NEARMISS_GI}"
+printf '*.txt\n' > "${NEARMISS_GI}/.gitleaksignore"
+printf 'placeholder text\n' > "${NEARMISS_GI}/readme.txt"
+run_gate "${NEARMISS_GI}" 1 "nearmiss-gitleaksignore-must-fail-gate"
+
+# ---------------------------------------------------------------------------
+# 12. Near-miss probe — gitleaks:allow comment must not bypass the gate
+#     Proves --ignore-gitleaks-allow is in effect.
+# ---------------------------------------------------------------------------
+echo
+echo "--- near-miss probe (gitleaks:allow comment must not suppress finding) ---"
+
+NEARMISS_GA="${TEST_BASE}/nearmiss-gitleaks-allow-$$"
+mkdir -p "${NEARMISS_GA}"
+# Real-entropy Notion token with an inline gitleaks:allow comment.
+printf 'token = "ntn_K3mP9xL2nQ7rF8vY4wJ1aT6sBuH0cD5eI9zG4oN2kR7pW3iU6yX1qM8"  # gitleaks:allow\n' > "${NEARMISS_GA}/leak.txt"
+run_gate "${NEARMISS_GA}" 1 "nearmiss-gitleaks-allow-comment-still-caught"
+
 echo
 echo "=== results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed ==="
 
