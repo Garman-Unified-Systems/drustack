@@ -50,11 +50,14 @@ jobs:
           gitleaks version
 
       - name: Fetch scanner from default branch
-        # Run the scanner from origin/main, not the candidate PR.
-        # Prevents a malicious PR from bypassing the gate by modifying the scanner itself.
+        # Run the scanner and rules from origin/main, not the candidate PR.
+        # Prevents a malicious PR from bypassing the gate by modifying the scanner or
+        # adding a permissive .gitleaks.toml. The script looks for the rules file at
+        # <SCRIPT_DIR>/release-gate-rules.toml so we place it beside the script in /tmp.
         run: |
           git fetch origin main
           git show origin/main:scripts/release-gate.sh > /tmp/release-gate-canonical.sh
+          git show origin/main:scripts/release-gate-rules.toml > /tmp/release-gate-rules.toml
           chmod +x /tmp/release-gate-canonical.sh
 
       - name: Run release gate

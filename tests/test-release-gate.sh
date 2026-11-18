@@ -366,6 +366,22 @@ printf 'runs on FAKENODE-ALPHA\n' > "${REDACT_MECH}/p.txt"
 check_no_denylist_term "redact-denylist-term-not-in-output" "${REDACT_MECH}"
 check_no_homepath_username "redact-homepath-username-not-in-output"
 
+# ---------------------------------------------------------------------------
+# 10. Near-miss probe — permissive .gitleaks.toml in scan dir must not bypass gate
+#     Proves that --config (canonical rules from main) overrides auto-discovery.
+# ---------------------------------------------------------------------------
+echo
+echo "--- near-miss probe (permissive local config must not bypass gate) ---"
+
+NEARMISS="${TEST_BASE}/nearmiss-permissive-toml-$$"
+mkdir -p "${NEARMISS}"
+# A maximally-permissive gitleaks config: no rules, everything allowed.
+printf '[allowlist]\ndescription = "allow all"\nregexes = [".*"]\n' > "${NEARMISS}/.gitleaks.toml"
+# A file containing a real-entropy token (gitleaks filters low-entropy sequential strings)
+printf 'token = "ntn_K3mP9xL2nQ7rF8vY4wJ1aT6sBuH0cD5eI9zG4oN2kR7pW3iU6yX1qM8"\n' > "${NEARMISS}/leak.txt"
+# Gate must still catch this because it uses --config pointing to the canonical rules file.
+run_gate "${NEARMISS}" 1 "nearmiss-permissive-toml-still-caught"
+
 echo
 echo "=== results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed ==="
 

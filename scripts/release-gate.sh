@@ -58,6 +58,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RULES_FILE="${SCRIPT_DIR}/release-gate-rules.toml"
 VIOLATIONS=0
 
+if [[ ! -f "${RULES_FILE}" ]]; then
+    printf >&2 "ERROR: Rules file not found: %s\n" "${RULES_FILE}"
+    printf >&2 "  Scanning without extended rules reduces coverage — aborting.\n"
+    printf >&2 "  In CI: the workflow must fetch scripts/release-gate-rules.toml from main.\n"
+    printf >&2 "  Locally: run the script from the repo root or set RULES_FILE=... explicitly.\n"
+    exit 1
+fi
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
